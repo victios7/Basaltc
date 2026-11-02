@@ -1,24 +1,35 @@
-.PHONY: test selftest bootstrap basm blink clean
+.PHONY: test selftest bootstrap basm blink clean runtime
 
 export PATH := $(CURDIR)/bin:$(PATH)
 
-selftest test:
+bin:
+	mkdir -p $@
+
+bin/basalt_rt.o: | bin
+	gcc -O2 -pipe -c -o bin/runtime.o runtime/runtime.c
+	gcc -O2 -pipe -c -o bin/arena.o runtime/arena.c
+	gcc -O2 -pipe -c -o bin/float_fmt.o runtime/float_fmt.c
+	gcc -O2 -pipe -c -o bin/accel.o runtime/accel.c
+	ld -r -o bin/basalt_rt.o bin/runtime.o bin/arena.o bin/float_fmt.o bin/accel.o
+	rm -f bin/runtime.o bin/arena.o bin/float_fmt.o bin/accel.o
+
+selftest test: bin/basalt_rt.o
 	@cp -f bin/basalt_rt.o /tmp/basalt_rt.o
 	@cp -f bin/basm /tmp/basm 2>/dev/null || true
 	./scripts/selftest.sh
 
-basm:
+basm: bin/basalt_rt.o
 	cp -f bin/basalt_rt.o /tmp/basalt_rt.o
 	bin/basaltc compiler/basm.bd -O2 -o bin/basm
 	@echo "built bin/basm from compiler/basm.bd"
 
-blink:
+blink: bin/basalt_rt.o
 	cp -f bin/basalt_rt.o /tmp/basalt_rt.o
 	bin/basaltc compiler/blink.bd -O2 -o bin/blink
 	@echo "built bin/blink from compiler/blink.bd"
 
 # stage0 unchanged; link step uses runtime so self-hosted basaltc resolves symbols
-bootstrap:
+bootstrap: bin/basalt_rt.o
 	gcc -O2 -o bin/stage0 \
 	  bootstrap/stage0-c/src/main.c \
 	  bootstrap/stage0-c/src/util.c \
@@ -29,7 +40,7 @@ bootstrap:
 	  bootstrap/stage0-c/src/codegen_c.c \
 	  -Ibootstrap/stage0-c/include
 	cp -f bin/basalt_rt.o /tmp/basalt_rt.o
-	bin/stage0 compiler/basaltc.bd -o bin/basaltc_tmp || true
+	bin/stage0 compiler/basaltc.bd -o bin/basaltc || true
 	@# Prefer linking generated C with full runtime (production)
 	@CFILE=; \
 	  for f in basaltc.bd.c bin/basaltc.bd.c /tmp/basaltc.bd.c "$$TMPDIR/basaltc.bd.c"; do \
