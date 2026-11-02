@@ -1,0 +1,10 @@
+@lang pebble
+@prelude pebble "box __pebble = 1 int64"
+@rule pebble "go" => "@cpu main(): int32 ["
+@rule pebble "stop" => "return(0)\n]"
+@rule pebble "n $name $val" => "box $name = $val int64"
+@rule pebble "+ $name $val" => "$name = $name + $val"
+@rule pebble "* $name $val" => "$name = $name * $val"
+@rule pebble "w $cond" => "while $cond ["
+@rule pebble "e" => "]"
+@rule pebble "p $name" => "print_int($name)\nprint_nl()"

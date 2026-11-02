@@ -1,0 +1,22 @@
+@lang zig
+@rule zig "var $name i64 = $val;" => "box $name = $val int64"
+@rule zig "$name += $val;" => "$name = $name + $val"
+@rule zig "$name -= $val;" => "$name = $name - $val"
+@rule zig "while ($cond) {" => "while $cond ["
+@rule zig "}" => "]"
+@rule zig "print($name);" => "print_int($name)\nprint_nl()"
+@rule zig "return;" => "return(0)"
+@rule zig "//$rest" => "// $rest"
+
+@cpu main(): int32 [
+    @zig[
+        var n i64 = 100;
+        var s i64 = 0;
+        while (n > 0) {
+        s += n;
+        n -= 1;
+        }
+        print(s);
+        return;
+    ]
+]

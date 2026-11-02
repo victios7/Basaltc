@@ -1,0 +1,431 @@
+// ============================================================
+// Basalt high-level library  —  @import "hl"
+// Prefijo hl. → hl_*
+//
+// SALIDA (como Python / Go): solo dos formas en el lenguaje
+//   print!(...)     → sin newline  (elige print_str / print_int debajo)
+//   println!(...)   → con newline
+//   Varios args: print!(a, b, c)  → espacios entre medias
+//
+// Esta librería es pegamento de alto nivel para el resto
+// (entrada, strings, files, vec, math, log…) sin multiplicar prints.
+// ============================================================
+@library "hl"
+
+// ---- reexport mental: la salida es print! / println! del lenguaje ----
+// (no hay hl.print_int / hl.println_str — usa print! / println!)
+
+// =====================================================================
+// ENTRADA (estilo input() de Python)
+// =====================================================================
+
+@cpu hl_input(): string [
+    return(scan_string())
+]
+
+@cpu hl_input_int(): int64 [
+    return(scan_int())
+]
+
+@cpu hl_input_float(): float64 [
+    return(scan_float())
+]
+
+@cpu hl_prompt(msg string): string [
+    print_str(msg)
+    return(scan_string())
+]
+
+@cpu hl_prompt_int(msg string): int64 [
+    print_str(msg)
+    return(scan_int())
+]
+
+@cpu hl_prompt_float(msg string): float64 [
+    print_str(msg)
+    return(scan_float())
+]
+
+@cpu hl_confirm(msg string): int64 [
+    print_str(msg)
+    print_str(" [y/n]: ")
+    box s = scan_string() string
+    if strcmp(s, "y") == 0 [ return(1) ]
+    if strcmp(s, "Y") == 0 [ return(1) ]
+    if strcmp(s, "yes") == 0 [ return(1) ]
+    if strcmp(s, "1") == 0 [ return(1) ]
+    return(0)
+]
+
+// =====================================================================
+// STRINGS
+// =====================================================================
+
+@cpu hl_len(s string): int64 [ return(strlen(s)) ]
+
+@cpu hl_eq(a string, b string): int64 [
+    if strcmp(a, b) == 0 [ return(1) ]
+    return(0)
+]
+
+@cpu hl_neq(a string, b string): int64 [
+    if strcmp(a, b) != 0 [ return(1) ]
+    return(0)
+]
+
+@cpu hl_concat(a string, b string): string [ return(str_concat(a, b)) ]
+
+@cpu hl_concat3(a string, b string, c string): string [
+    return(str_concat(str_concat(a, b), c))
+]
+
+@cpu hl_itoa(v int64): string [ return(itoa(v)) ]
+
+@cpu hl_substr(s string, start int64, n int64): string [
+    return(substr(s, start, n))
+]
+
+@cpu hl_char_at(s string, i int64): int64 [ return(char_at(s, i)) ]
+
+@cpu hl_is_empty(s string): int64 [
+    if strlen(s) == 0 [ return(1) ]
+    return(0)
+]
+
+@cpu hl_starts_with(s string, prefix string): int64 [
+    box n = strlen(prefix) int64
+    if n > strlen(s) [ return(0) ]
+    if strcmp(substr(s, 0, n), prefix) == 0 [ return(1) ]
+    return(0)
+]
+
+@cpu hl_contains(s string, needle string): int64 [
+    box n = strlen(s) int64
+    box m = strlen(needle) int64
+    if m == 0 [ return(1) ]
+    if m > n [ return(0) ]
+    box i = 0 int64
+    while i + m <= n [
+        if strcmp(substr(s, i, m), needle) == 0 [ return(1) ]
+        i = i + 1
+    ]
+    return(0)
+]
+
+@cpu hl_index_of(s string, needle string): int64 [
+    box n = strlen(s) int64
+    box m = strlen(needle) int64
+    if m == 0 [ return(0) ]
+    if m > n [ return(0 - 1) ]
+    box i = 0 int64
+    while i + m <= n [
+        if strcmp(substr(s, i, m), needle) == 0 [ return(i) ]
+        i = i + 1
+    ]
+    return(0 - 1)
+]
+
+@cpu hl_repeat(s string, n int64): string [
+    box out = "" string
+    box i = 0 int64
+    while i < n [
+        out = str_concat(out, s)
+        i = i + 1
+    ]
+    return(out)
+]
+
+@cpu hl_join(a string, sep string, b string): string [
+    return(str_concat(str_concat(a, sep), b))
+]
+
+@cpu hl_trim_left(s string): string [
+    box n = strlen(s) int64
+    box i = 0 int64
+    while i < n [
+        box c = char_at(s, i) int64
+        box sp = 0 int64
+        if c == 32 [ sp = 1 ]
+        if c == 9 [ sp = 1 ]
+        if c == 10 [ sp = 1 ]
+        if c == 13 [ sp = 1 ]
+        if sp == 0 [ return(substr(s, i, n - i)) ]
+        i = i + 1
+    ]
+    return("")
+]
+
+// =====================================================================
+// ARCHIVOS
+// =====================================================================
+
+@cpu hl_read(path string): string [ return(read_file(path)) ]
+
+@cpu hl_write(path string, data string): int64 [ return(write_file(path, data)) ]
+
+@cpu hl_write_bin(path string, p ptr, n int64): int64 [
+    return(write_file_bin(path, p, n))
+]
+
+@cpu hl_append(path string, data string): int64 [
+    return(append_file_text(path, data))
+]
+
+@cpu hl_append_bin(path string, p ptr, n int64): int64 [
+    return(append_file_bin(path, p, n))
+]
+
+@cpu hl_file_size(path string): int64 [ return(file_size(path)) ]
+
+@cpu hl_read_or(path string, fallback string): string [
+    box t = read_file(path) string
+    if strlen(t) == 0 [ return(fallback) ]
+    return(t)
+]
+
+@cpu hl_write_line(path string, line string): int64 [
+    return(write_file(path, str_concat(line, "\n")))
+]
+
+@cpu hl_append_line(path string, line string): int64 [
+    return(append_file_text(path, str_concat(line, "\n")))
+]
+
+// =====================================================================
+// MEMORIA / BUFFERS / VEC
+// =====================================================================
+
+@cpu hl_alloc(n int64): ptr [ return(allocator(n)) ]
+
+@cpu hl_free(p ptr): int64 [
+    free(p)
+    return(0)
+]
+
+@cpu hl_memset(p ptr, byte_v int64, n int64): int64 [
+    memset_n(p, byte_v, n)
+    return(n)
+]
+
+@cpu hl_memcpy(dst ptr, src ptr, n int64): int64 [
+    memcpy_n(dst, src, n)
+    return(n)
+]
+
+@cpu hl_pool(name string, bytes int64, tier int64): int64 [
+    return(pool_create(name, bytes, tier))
+]
+
+@cpu hl_pool_free(name string): int64 [ return(pool_free(name)) ]
+
+@cpu hl_pool_alloc(name string, bytes int64): ptr [
+    return(pool_alloc(name, bytes))
+]
+
+@cpu hl_store(p ptr, off int64, v int64): int64 [
+    store_i64(p, off, v)
+    return(0)
+]
+
+@cpu hl_load(p ptr, off int64): int64 [ return(load_i64(p, off)) ]
+
+@cpu hl_buf(n int64): ptr [
+    box p = allocator(n * 8) ptr
+    memset_n(p, 0, n * 8)
+    return(p)
+]
+
+@cpu hl_buf_set(p ptr, i int64, v int64): int64 [
+    store_i64(p, i * 8, v)
+    return(0)
+]
+
+@cpu hl_buf_get(p ptr, i int64): int64 [ return(load_i64(p, i * 8)) ]
+
+@cpu hl_buf_fill(p ptr, n int64, v int64): int64 [
+    box i = 0 int64
+    while i < n [
+        store_i64(p, i * 8, v)
+        i = i + 1
+    ]
+    return(n)
+]
+
+@cpu hl_buf_sum(p ptr, n int64): int64 [
+    box s = 0 int64
+    box i = 0 int64
+    while i < n [
+        s = s + load_i64(p, i * 8)
+        i = i + 1
+    ]
+    return(s)
+]
+
+// vec: [len|cap|data...] data @16
+@cpu hl_vec_new(cap int64): ptr [
+    box c = cap int64
+    if c < 4 [ c = 4 ]
+    box p = allocator(16 + c * 8) ptr
+    store_i64(p, 0, 0)
+    store_i64(p, 8, c)
+    return(p)
+]
+
+@cpu hl_vec_len(v ptr): int64 [ return(load_i64(v, 0)) ]
+
+@cpu hl_vec_get(v ptr, i int64): int64 [ return(load_i64(v, 16 + i * 8)) ]
+
+@cpu hl_vec_set(v ptr, i int64, x int64): int64 [
+    store_i64(v, 16 + i * 8, x)
+    return(0)
+]
+
+@cpu hl_vec_push(v ptr, x int64): ptr [
+    box n = load_i64(v, 0) int64
+    box c = load_i64(v, 8) int64
+    if n >= c [
+        box nc = c * 2 int64
+        box nv = allocator(16 + nc * 8) ptr
+        memcpy_n(nv, v, 16 + n * 8)
+        store_i64(nv, 8, nc)
+        free(v)
+        v = nv
+    ]
+    store_i64(v, 16 + n * 8, x)
+    store_i64(v, 0, n + 1)
+    return(v)
+]
+
+@cpu hl_vec_pop(v ptr): int64 [
+    box n = load_i64(v, 0) int64
+    if n <= 0 [ return(0) ]
+    box x = load_i64(v, 16 + (n - 1) * 8) int64
+    store_i64(v, 0, n - 1)
+    return(x)
+]
+
+@cpu hl_vec_sum(v ptr): int64 [
+    box n = load_i64(v, 0) int64
+    box s = 0 int64
+    box i = 0 int64
+    while i < n [
+        s = s + load_i64(v, 16 + i * 8)
+        i = i + 1
+    ]
+    return(s)
+]
+
+@cpu hl_vec_free(v ptr): int64 [
+    free(v)
+    return(0)
+]
+
+// =====================================================================
+// MATH
+// =====================================================================
+
+@cpu hl_min(a int64, b int64): int64 [
+    if a < b [ return(a) ]
+    return(b)
+]
+
+@cpu hl_max(a int64, b int64): int64 [
+    if a > b [ return(a) ]
+    return(b)
+]
+
+@cpu hl_abs(a int64): int64 [
+    if a < 0 [ return(0 - a) ]
+    return(a)
+]
+
+@cpu hl_clamp(v int64, lo int64, hi int64): int64 [
+    if v < lo [ return(lo) ]
+    if v > hi [ return(hi) ]
+    return(v)
+]
+
+@cpu hl_pow(base int64, exp int64): int64 [
+    box r = 1 int64
+    box b = base int64
+    box e = exp int64
+    while e > 0 [
+        if e - (e / 2) * 2 == 1 [ r = r * b ]
+        b = b * b
+        e = e / 2
+    ]
+    return(r)
+]
+
+@cpu hl_gcd(a int64, b int64): int64 [
+    box x = hl_abs(a) int64
+    box y = hl_abs(b) int64
+    while y != 0 [
+        box t = y int64
+        y = x - (x / y) * y
+        x = t
+    ]
+    return(x)
+]
+
+@cpu hl_sum_range(lo int64, hi int64): int64 [
+    box s = 0 int64
+    box i = lo int64
+    while i <= hi [
+        s = s + i
+        i = i + 1
+    ]
+    return(s)
+]
+
+// =====================================================================
+// ASSERT / LOG  (log usa el runtime; el usuario usa println! para hablar)
+// =====================================================================
+
+@cpu hl_assert(cond int64, msg string): int64 [
+    if cond == 0 [
+        print_str("assert failed: ")
+        print_str(msg)
+        print_nl()
+        exit(1)
+    ]
+    return(0)
+]
+
+@cpu hl_assert_eq(a int64, b int64, msg string): int64 [
+    if a != b [
+        print_str("assert_eq failed: ")
+        print_str(msg)
+        print_str(" ")
+        print_int(a)
+        print_str(" != ")
+        print_int(b)
+        print_nl()
+        exit(1)
+    ]
+    return(0)
+]
+
+@cpu hl_panic(msg string): int64 [
+    panic(msg)
+    return(0)
+]
+
+@cpu hl_log(msg string): int64 [
+    print_str(msg)
+    print_nl()
+    return(0)
+]
+
+// =====================================================================
+// ENTORNO
+// =====================================================================
+
+@cpu hl_argc(): int64 [ return(argc()) ]
+@cpu hl_argv(i int64): string [ return(argv(i)) ]
+@cpu hl_getenv(k string): string [ return(getenv(k)) ]
+@cpu hl_system(cmd string): int64 [ return(system(cmd)) ]
+@cpu hl_exit(code int64): int64 [
+    exit(code)
+    return(code)
+]

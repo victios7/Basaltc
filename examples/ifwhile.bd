@@ -1,0 +1,10 @@
+@cpu main(): int32 [
+    box x = 10 int32
+    box y = 0 int32
+    while x > 0 [
+        y = y + x
+        x = x - 1
+    ]
+    print_int(y)
+    return(0)
+]

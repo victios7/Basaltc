@@ -1,0 +1,48 @@
+@lang obsidian
+@prelude obsidian "box __stk0 = 0 int64\nbox __stk1 = 0 int64\nbox __stk2 = 0 int64\nbox __sp = 0 int64"
+
+// Obsidian: postfix / stack language (unlike C-family or forge/ember DSLs)
+// Example:
+//   10 20 add print     → push 10, push 20, add, print top
+//   5 dup mul print     → 25
+
+// numbers: push onto virtual stack via rotating slots
+@rule obsidian "push $val" => "if __sp == 0 [ __stk0 = $val ]\nif __sp == 1 [ __stk1 = $val ]\nif __sp == 2 [ __stk2 = $val ]\n__sp = __sp + 1"
+@rule obsidian "lit $val" => "if __sp == 0 [ __stk0 = $val ]\nif __sp == 1 [ __stk1 = $val ]\nif __sp == 2 [ __stk2 = $val ]\n__sp = __sp + 1"
+
+// stack ops
+@rule obsidian "dup" => "if __sp == 1 [ __stk1 = __stk0  __sp = 2 ]\nif __sp == 2 [ __stk2 = __stk1  __sp = 3 ]"
+@rule obsidian "drop" => "__sp = __sp - 1"
+@rule obsidian "swap" => "box __t = __stk0 int64\n__stk0 = __stk1\n__stk1 = __t"
+@rule obsidian "over" => "if __sp == 2 [ __stk2 = __stk0  __sp = 3 ]"
+
+// arithmetic (top two: stk0 op stk1 → stk0, sp--)
+@rule obsidian "add" => "__stk0 = __stk0 + __stk1\n__sp = __sp - 1"
+@rule obsidian "sub" => "__stk0 = __stk0 - __stk1\n__sp = __sp - 1"
+@rule obsidian "mul" => "__stk0 = __stk0 * __stk1\n__sp = __sp - 1"
+@rule obsidian "div" => "__stk0 = __stk0 / __stk1\n__sp = __sp - 1"
+@rule obsidian "mod" => "__stk0 = __stk0 - (__stk0 / __stk1) * __stk1\n__sp = __sp - 1"
+@rule obsidian "neg" => "__stk0 = 0 - __stk0"
+
+// compare → 0/1 on stack top
+@rule obsidian "eq" => "if __stk0 == __stk1 [ __stk0 = 1 ] else [ __stk0 = 0 ]\n__sp = __sp - 1"
+@rule obsidian "lt" => "if __stk0 < __stk1 [ __stk0 = 1 ] else [ __stk0 = 0 ]\n__sp = __sp - 1"
+@rule obsidian "gt" => "if __stk0 > __stk1 [ __stk0 = 1 ] else [ __stk0 = 0 ]\n__sp = __sp - 1"
+
+// I/O
+@rule obsidian "print" => "print_int(__stk0)\nprint_nl()"
+@rule obsidian "emit" => "print_int(__stk0)"
+
+// control sugar
+@rule obsidian "when $cond [" => "if $cond ["
+@rule obsidian "repeat $n [" => "box __ri = 0 int64\nwhile __ri < $n [\n__ri = __ri + 1"
+
+// bare integer token as push (common postfix style): handled if user writes "push N"
+// named cell store/load
+@rule obsidian "store $name" => "box $name = __stk0 int64\n__sp = __sp - 1"
+@rule obsidian "load $name" => "if __sp == 0 [ __stk0 = $name ]\nif __sp == 1 [ __stk1 = $name ]\nif __sp == 2 [ __stk2 = $name ]\n__sp = __sp + 1"
+
+// program frame
+@rule obsidian "begin" => "@cpu main(): int32 ["
+@rule obsidian "end" => "return(0)\n]"
+@rule obsidian "halt" => "return(__stk0)"

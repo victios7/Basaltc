@@ -1,0 +1,73 @@
+// Blink — link driver (best system linker via basm)
+// mold > lld > gold > ld — never gcc
+
+@cpu ends_with(s string, suf string): int64 [
+    box n = strlen(s) int64
+    box m = strlen(suf) int64
+    if n < m [ return(0) ]
+    box i = 0 int64
+    while i < m [
+        if char_at(s, n - m + i) != char_at(suf, i) [ return(0) ]
+        i = i + 1
+    ]
+    return(1)
+]
+
+@cpu main(): int32 [
+    box ai = 1 int64
+    box ac = argc() int64
+    box out = "a.out" string
+    box rt = "" string
+    box input = "" string
+    box verbose = 0 int64
+    while ai < ac [
+        box a = argv(ai) string
+        if strcmp(a, "-o") == 0 [
+            ai = ai + 1
+            if ai < ac [ out = argv(ai) ]
+        ]
+        if strcmp(a, "-r") == 0 [
+            ai = ai + 1
+            if ai < ac [ rt = argv(ai) ]
+        ]
+        if strcmp(a, "-v") == 0 [ verbose = 1 ]
+        if strcmp(a, "--help") == 0 [
+            print_str("blink — runs basm -e (best linker: mold>lld>gold>ld)\n")
+            return(0)
+        ]
+        if char_at(a, 0) != 45 [
+            if strlen(input) == 0 [ input = a ]
+        ]
+        ai = ai + 1
+    ]
+    if strlen(input) == 0 [
+        print_str("error: blink: need .basm\n")
+        return(1)
+    ]
+    if ends_with(input, ".basm") == 0 [
+        print_str("error: blink: need .basm\n")
+        return(1)
+    ]
+    box cmd = "basm -e -o '" string
+    if system("test -x bin/basm") == 0 [ cmd = "bin/basm -e -o '" ]
+    cmd = str_concat(cmd, out)
+    cmd = str_concat(cmd, "'")
+    if strlen(rt) > 0 [
+        cmd = str_concat(cmd, " -r '")
+        cmd = str_concat(cmd, rt)
+        cmd = str_concat(cmd, "'")
+    ]
+    if verbose == 1 [ cmd = str_concat(cmd, " -v") ]
+    cmd = str_concat(cmd, " '")
+    cmd = str_concat(cmd, input)
+    cmd = str_concat(cmd, "'")
+    box rc = system(cmd) int64
+    if rc != 0 [
+        print_str("error: blink: basm failed\n")
+        return(1)
+    ]
+    print_str("blink: linked ")
+    print_str(out)
+    print_nl()
+    return(0)
+]

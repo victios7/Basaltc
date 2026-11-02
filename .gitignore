@@ -1,0 +1,13 @@
+dist/
+*.o
+*.basm
+*.bir
+*.exe
+*.deb
+*.msi
+payload/
+basaltc.bd.c
+*.tmp
+/tmp/
+.DS_Store
+*.user

@@ -1,0 +1,121 @@
+  1. bal_advanced_cse_arith
+  2. bal_arith_geo
+  3. bal_arsenal
+  4. bal_const_prop_global
+  5. bal_dag_solve
+  6. bal_dep_graph_close
+  7. bal_dot_arith
+  8. bal_egraph
+  9. bal_egraph_add_rules
+ 10. bal_equation_fixpoint
+ 11. bal_fib_matrix
+ 12. bal_fuse_loops
+ 13. bal_geom_sum
+ 14. bal_has
+ 15. bal_invariant_hoist
+ 16. bal_keep
+ 17. bal_lcg_step
+ 18. bal_loop_markers
+ 19. bal_mat2_pow_apply
+ 20. bal_nested_recurrence
+ 21. bal_optimize
+ 22. bal_optimize_massive
+ 23. bal_poly_hash_cf
+ 24. bal_pow_stack
+ 25. bal_pulse
+ 26. bal_pulse_geom_train
+ 27. bal_pulse_lcg_close
+ 28. bal_pulse_pow
+ 29. bal_pulse_scan_A
+ 30. bal_pure_calls
+ 31. bal_rewrite_arith_identities
+ 32. bal_scan_li_after
+ 33. bal_smt
+ 34. bal_smt_gf2_xor_close
+ 35. bal_strip_ws_line
+ 36. bal_sum_cubes
+ 37. bal_sum_k_pow
+ 38. bal_table_close_asm
+ 39. bal_tensor
+ 40. bal_tensor_hint
+ 41. bal_try_lcg_close
+ 42. bal_try_poly_close
+ 43. bal_try_power_sums
+ 44. bal_wave
+ 45. bal_wave_front
+ 46. bal_wave_nest_close
+ 47. bam_affine3_apply
+ 48. bam_analyze_deep
+ 49. bam_count
+ 50. bam_geom
+ 51. bam_itoa_emit
+ 52. bam_mat3_mul_cell
+ 53. bam_mat3_pow_s0
+ 54. bam_nest
+ 55. bam_optimize
+ 56. bam_optimize_aggressive
+ 57. bam_pow_u
+ 58. bam_scan_has
+ 59. bam_sum_arith
+ 60. bam_sum_sq
+ 61. bam_table2_dep
+ 62. bam_table2_sum
+ 63. bam_table2_sum_ij
+ 64. bam_table3_dep
+ 65. bam_table3_sum
+ 66. bam_table3_wave
+ 67. bam_try_general_affine
+ 68. bandit_get_l
+ 69. bandit_get_w
+ 70. bandit_optimize
+ 71. bandit_run_arm
+ 72. bandit_ucb
+ 73. bir_algebra_graph
+ 74. bir_arsenal
+ 75. bir_const_fold_add
+ 76. bir_dedupe
+ 77. bir_graph_lookup
+ 78. bir_graph_put
+ 79. bir_graph_vn
+ 80. bir_optimize
+ 81. bir_to_basm
+ 82. bir_trim
+ 83. bpo_arsenal
+ 84. bpo_cf_arith_sum_slots
+ 85. bpo_cf_count_slots
+ 86. bpo_clean_arith
+ 87. bpo_closed_form_sum
+ 88. bpo_cmpi_loop
+ 89. bpo_dce_mov
+ 90. bpo_dead_li
+ 91. bpo_fold_inc1
+ 92. bpo_fold_memops
+ 93. bpo_gpu_opt
+ 94. bpo_graph_dce_labels
+ 95. bpo_math_matrix_mix
+ 96. bpo_peep_cpu
+ 97. bpo_promote_abc_loop
+ 98. bpo_promote_dep_loop
+ 99. bpo_promote_loop_regs
+100. bpo_promote_mix_loop
+101. bpo_rt_fold_strlen_const
+102. bpo_runtime_aware
+103. bpo_simd_sum_hint
+104. bpo_strength_count
+105. bpo_strength_mul_add
+106. bpo_unroll_reg_loop
+107. bpo_unroll_x4
+108. pow_bir_pulse
+109. pow_bir_wave
+110. pow_cost
+111. pow_eclass_get
+112. pow_eclass_put
+113. pow_egraph_saturate_basm
+114. pow_optimize
+115. pow_optimize_brutal
+116. pow_pulse
+117. pow_smt_apply
+118. pow_smt_loop_independent
+119. pow_wave
+
+Total: 120

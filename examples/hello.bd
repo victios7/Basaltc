@@ -1,0 +1,5 @@
+@cpu main(): int32 [
+    print_int(42)
+    print_nl()
+    return(0)
+]

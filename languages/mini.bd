@@ -1,0 +1,12 @@
+@lang mini
+@prelude mini "box __mini = 1 int64"
+@rule mini "SET $name $val" => "box $name = $val int64"
+@rule mini "ADD $name $val" => "$name = $name + $val"
+@rule mini "SUB $name $val" => "$name = $name - $val"
+@rule mini "MUL $name $val" => "$name = $name * $val"
+@rule mini "SHOW $name" => "print_int($name)\nprint_nl()"
+@rule mini "SAY $rest" => "print_str(\"$rest\")\nprint_nl()"
+@rule mini "LOOP $cond" => "while $cond ["
+@rule mini "END" => "]"
+@rule mini "IF $cond" => "if $cond ["
+@rule mini "RET $val" => "return($val)"

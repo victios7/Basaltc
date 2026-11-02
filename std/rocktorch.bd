@@ -1,0 +1,749 @@
+// ============================================================
+// Rocktorch — production tensor / training library for Basalt
+// Import: @import "Rocktorch"   calls: rt.fn → rt_fn (@library "rt")
+// Devices: CPU=0 GPU=1 TPU=2 NPU=3 LPU=4
+// Format: RTLE1 little-endian closed ecosystem (fast load/store)
+// ============================================================
+@library "rt"
+@import "std"
+
+// ---- device / memory ------------------------------------------------
+@cpu rt_init_vram(bytes int64): int64 [ return(pool_create("rt_vram", bytes, 2)) ]
+@cpu rt_init_tpu(bytes int64): int64 [ return(pool_create("rt_tpu", bytes, 4)) ]
+@cpu rt_init_npu(bytes int64): int64 [ return(pool_create("rt_npu", bytes, 5)) ]
+@cpu rt_init_lpu(bytes int64): int64 [ return(pool_create("rt_lpu", bytes, 6)) ]
+@cpu rt_init_ram(bytes int64): int64 [ return(pool_create("rt_ram", bytes, 0)) ]
+@cpu rt_workspace(name string, bytes int64, tier int64): int64 [
+    return(pool_create(name, bytes, tier))
+]
+@cpu rt_workspace_free(name string): int64 [ return(pool_free(name)) ]
+
+@cpu rt_best_device(): int64 [
+    if lpu_available() == 1 [ return(4) ]
+    if npu_available() == 1 [ return(3) ]
+    if tpu_available() == 1 [ return(2) ]
+    if gpu_available() == 1 [ return(1) ]
+    return(0)
+]
+@cpu rt_device_alloc(nbytes int64, kind int64): ptr [
+    if kind == 1 [ if gpu_available() == 1 [ return(vram_alloc(nbytes)) ] ]
+    if kind == 2 [ if tpu_available() == 1 [ return(tpu_alloc(nbytes)) ] ]
+    if kind == 3 [ if npu_available() == 1 [ return(npu_alloc(nbytes)) ] ]
+    if kind == 4 [ if lpu_available() == 1 [ return(lpu_alloc(nbytes)) ] ]
+    return(allocator(nbytes))
+]
+@cpu rt_device_free(p ptr, kind int64): int64 [
+    if kind == 1 [ vram_free(p) return(0) ]
+    if kind == 2 [ tpu_free(p) return(0) ]
+    if kind == 3 [ npu_free(p) return(0) ]
+    if kind == 4 [ lpu_free(p) return(0) ]
+    free(p)
+    return(0)
+]
+@cpu rt_sync(kind int64): int64 [
+    if kind == 1 [ gpu_sync() return(0) ]
+    if kind == 2 [ return(0) ]
+    if kind == 3 [ return(npu_sync()) ]
+    if kind == 4 [ return(lpu_sync()) ]
+    return(0)
+]
+@cpu rt_gpu_ok(): int64 [ return(gpu_available()) ]
+@cpu rt_tpu_ok(): int64 [ return(tpu_available()) ]
+@cpu rt_npu_ok(): int64 [ return(npu_available()) ]
+@cpu rt_lpu_ok(): int64 [ return(lpu_available()) ]
+
+// ---- tensor layout RTLE1: [magic|ver|nelem|kind|ndim|s0|s1|s2|s3|flags] + data ----
+// offsets: 0 magic, 8 ver, 16 nelem, 24 kind, 32 ndim, 40..72 shape[4], 72 flags, 80 data
+@cpu rt_hdr_size(): int64 [ return(80) ]
+
+@cpu rt_tensor_view(nelem int64, kind int64, ndim int64, s0 int64, s1 int64, s2 int64, s3 int64): ptr [
+    box nbytes = 80 + nelem * 8 int64
+    box p = rt_device_alloc(nbytes, kind) ptr
+    memset_n(p, 0, nbytes)
+    store_i64(p, 0, 0x31454C54)
+    store_i64(p, 8, 2)
+    store_i64(p, 16, nelem)
+    store_i64(p, 24, kind)
+    store_i64(p, 32, ndim)
+    store_i64(p, 40, s0)
+    store_i64(p, 48, s1)
+    store_i64(p, 56, s2)
+    store_i64(p, 64, s3)
+    store_i64(p, 72, 0)
+    return(p)
+]
+@cpu rt_tensor_on(nelem int64, kind int64): ptr [
+    return(rt_tensor_view(nelem, kind, 1, nelem, 1, 1, 1))
+]
+@cpu rt_tensor(nelem int64): ptr [ return(rt_tensor_on(nelem, 0)) ]
+@cpu rt_tensor_vram(nelem int64): ptr [ return(rt_tensor_on(nelem, 1)) ]
+@cpu rt_tensor_tpu(nelem int64): ptr [ return(rt_tensor_on(nelem, 2)) ]
+@cpu rt_tensor_npu(nelem int64): ptr [ return(rt_tensor_on(nelem, 3)) ]
+@cpu rt_tensor_lpu(nelem int64): ptr [ return(rt_tensor_on(nelem, 4)) ]
+@cpu rt_zeros(nelem int64): ptr [
+    box t = rt_tensor(nelem) ptr
+    rt_zero(t)
+    return(t)
+]
+@cpu rt_ones(nelem int64): ptr [
+    box t = rt_tensor(nelem) ptr
+    rt_fill(t, 1)
+    return(t)
+]
+@cpu rt_tensor2d(rows int64, cols int64, kind int64): ptr [
+    return(rt_tensor_view(rows * cols, kind, 2, rows, cols, 1, 1))
+]
+@cpu rt_tensor3d(a int64, b int64, c int64, kind int64): ptr [
+    return(rt_tensor_view(a * b * c, kind, 3, a, b, c, 1))
+]
+@cpu rt_data(t ptr): ptr [ return(ptr_add(t, 80)) ]
+@cpu rt_nelem(t ptr): int64 [ return(load_i64(t, 16)) ]
+@cpu rt_device_kind(t ptr): int64 [ return(load_i64(t, 24)) ]
+@cpu rt_ndim(t ptr): int64 [ return(load_i64(t, 32)) ]
+@cpu rt_shape0(t ptr): int64 [ return(load_i64(t, 40)) ]
+@cpu rt_shape1(t ptr): int64 [ return(load_i64(t, 48)) ]
+@cpu rt_nbytes(t ptr): int64 [ return(80 + load_i64(t, 16) * 8) ]
+@cpu rt_free_tensor(t ptr): int64 [
+    return(rt_device_free(t, load_i64(t, 24)))
+]
+
+// ---- element ops (CPU) ----------------------------------------------
+@cpu rt_fill(t ptr, v int64): int64 [
+    box n = load_i64(t, 16) int64
+    box d = ptr_add(t, 80) ptr
+    box i = 0 int64
+    while i < n [
+        store_i64(d, i * 8, v)
+        i = i + 1
+    ]
+    return(n)
+]
+@cpu rt_zero(t ptr): int64 [
+    box n = load_i64(t, 16) int64
+    memset_n(ptr_add(t, 80), 0, n * 8)
+    return(n)
+]
+@cpu rt_copy(dst ptr, src ptr): int64 [
+    box n = load_i64(dst, 16) int64
+    memcpy_n(ptr_add(dst, 80), ptr_add(src, 80), n * 8)
+    return(n)
+]
+@cpu rt_add(dst ptr, a ptr, b ptr): int64 [
+    box n = load_i64(dst, 16) int64
+    box D = ptr_add(dst, 80) ptr
+    box A = ptr_add(a, 80) ptr
+    box B = ptr_add(b, 80) ptr
+    box i = 0 int64
+    while i < n [
+        store_i64(D, i * 8, load_i64(A, i * 8) + load_i64(B, i * 8))
+        i = i + 1
+    ]
+    return(n)
+]
+@cpu rt_sub(dst ptr, a ptr, b ptr): int64 [
+    box n = load_i64(dst, 16) int64
+    box D = ptr_add(dst, 80) ptr
+    box A = ptr_add(a, 80) ptr
+    box B = ptr_add(b, 80) ptr
+    box i = 0 int64
+    while i < n [
+        store_i64(D, i * 8, load_i64(A, i * 8) - load_i64(B, i * 8))
+        i = i + 1
+    ]
+    return(n)
+]
+@cpu rt_mul(dst ptr, a ptr, b ptr): int64 [
+    box n = load_i64(dst, 16) int64
+    box D = ptr_add(dst, 80) ptr
+    box A = ptr_add(a, 80) ptr
+    box B = ptr_add(b, 80) ptr
+    box i = 0 int64
+    while i < n [
+        store_i64(D, i * 8, load_i64(A, i * 8) * load_i64(B, i * 8))
+        i = i + 1
+    ]
+    return(n)
+]
+@cpu rt_scale(t ptr, s int64): int64 [
+    box n = load_i64(t, 16) int64
+    box d = ptr_add(t, 80) ptr
+    box i = 0 int64
+    while i < n [
+        store_i64(d, i * 8, load_i64(d, i * 8) * s)
+        i = i + 1
+    ]
+    return(n)
+]
+@cpu rt_axpy(y ptr, a int64, x ptr): int64 [
+    // y = a*x + y
+    box n = load_i64(y, 16) int64
+    box Y = ptr_add(y, 80) ptr
+    box X = ptr_add(x, 80) ptr
+    box i = 0 int64
+    while i < n [
+        store_i64(Y, i * 8, a * load_i64(X, i * 8) + load_i64(Y, i * 8))
+        i = i + 1
+    ]
+    return(n)
+]
+@cpu rt_dot(a ptr, b ptr): int64 [
+    box n = load_i64(a, 16) int64
+    box A = ptr_add(a, 80) ptr
+    box B = ptr_add(b, 80) ptr
+    box acc = 0 int64
+    box i = 0 int64
+    while i < n [
+        acc = acc + load_i64(A, i * 8) * load_i64(B, i * 8)
+        i = i + 1
+    ]
+    return(acc)
+]
+@cpu rt_sum(t ptr): int64 [
+    box n = load_i64(t, 16) int64
+    box d = ptr_add(t, 80) ptr
+    box acc = 0 int64
+    box i = 0 int64
+    while i < n [
+        acc = acc + load_i64(d, i * 8)
+        i = i + 1
+    ]
+    return(acc)
+]
+@cpu rt_max(t ptr): int64 [
+    box n = load_i64(t, 16) int64
+    box d = ptr_add(t, 80) ptr
+    box m = load_i64(d, 0) int64
+    box i = 1 int64
+    while i < n [
+        box v = load_i64(d, i * 8) int64
+        if v > m [ m = v ]
+        i = i + 1
+    ]
+    return(m)
+]
+@cpu rt_clamp(t ptr, lo int64, hi int64): int64 [
+    box n = load_i64(t, 16) int64
+    box d = ptr_add(t, 80) ptr
+    box i = 0 int64
+    while i < n [
+        box v = load_i64(d, i * 8) int64
+        if v < lo [ v = lo ]
+        if v > hi [ v = hi ]
+        store_i64(d, i * 8, v)
+        i = i + 1
+    ]
+    return(n)
+]
+
+// ---- matmul / linear / conv1d ---------------------------------------
+@cpu rt_matmul(C ptr, A ptr, B ptr, M int64, N int64, K int64): int64 [
+    box Cd = ptr_add(C, 80) ptr
+    box Ad = ptr_add(A, 80) ptr
+    box Bd = ptr_add(B, 80) ptr
+    box i = 0 int64
+    while i < M [
+        box j = 0 int64
+        while j < N [
+            box acc = 0 int64
+            box k = 0 int64
+            while k < K [
+                acc = acc + load_i64(Ad, (i * K + k) * 8) * load_i64(Bd, (k * N + j) * 8)
+                k = k + 1
+            ]
+            store_i64(Cd, (i * N + j) * 8, acc)
+            j = j + 1
+        ]
+        i = i + 1
+    ]
+    return(M * N)
+]
+// blocked matmul for cache (tile 16)
+@cpu rt_matmul_tiled(C ptr, A ptr, B ptr, M int64, N int64, K int64): int64 [
+    box Cd = ptr_add(C, 80) ptr
+    box Ad = ptr_add(A, 80) ptr
+    box Bd = ptr_add(B, 80) ptr
+    box TS = 16 int64
+    box i0 = 0 int64
+    while i0 < M [
+        box j0 = 0 int64
+        while j0 < N [
+            box k0 = 0 int64
+            while k0 < K [
+                box i1 = i0 + TS int64
+                if i1 > M [ i1 = M ]
+                box j1 = j0 + TS int64
+                if j1 > N [ j1 = N ]
+                box k1 = k0 + TS int64
+                if k1 > K [ k1 = K ]
+                box i = i0 int64
+                while i < i1 [
+                    box j = j0 int64
+                    while j < j1 [
+                        box acc = load_i64(Cd, (i * N + j) * 8) int64
+                        if k0 == 0 [ acc = 0 ]
+                        box k = k0 int64
+                        while k < k1 [
+                            acc = acc + load_i64(Ad, (i * K + k) * 8) * load_i64(Bd, (k * N + j) * 8)
+                            k = k + 1
+                        ]
+                        store_i64(Cd, (i * N + j) * 8, acc)
+                        j = j + 1
+                    ]
+                    i = i + 1
+                ]
+                k0 = k0 + TS
+            ]
+            j0 = j0 + TS
+        ]
+        i0 = i0 + TS
+    ]
+    return(M * N)
+]
+@cpu rt_linear(y ptr, x ptr, W ptr, bias ptr, B int64, In int64, Out int64): int64 [
+    box Y = ptr_add(y, 80) ptr
+    box X = ptr_add(x, 80) ptr
+    box Ww = ptr_add(W, 80) ptr
+    box has_b = 0 int64
+    if bias != 0 [ has_b = 1 ]
+    box b = 0 int64
+    while b < B [
+        box o = 0 int64
+        while o < Out [
+            box acc = 0 int64
+            if has_b == 1 [ acc = load_i64(ptr_add(bias, 80), o * 8) ]
+            box i = 0 int64
+            while i < In [
+                acc = acc + load_i64(X, (b * In + i) * 8) * load_i64(Ww, (i * Out + o) * 8)
+                i = i + 1
+            ]
+            store_i64(Y, (b * Out + o) * 8, acc)
+            o = o + 1
+        ]
+        b = b + 1
+    ]
+    return(B * Out)
+]
+@cpu rt_conv1d(out ptr, inp ptr, ker ptr, N int64, Cin int64, Cout int64, L int64, K int64): int64 [
+    // naive: out[n,co,l] = sum_ci,k inp[n,ci,l+k]*ker[co,ci,k]
+    box O = ptr_add(out, 80) ptr
+    box I = ptr_add(inp, 80) ptr
+    box W = ptr_add(ker, 80) ptr
+    box Lout = L - K + 1 int64
+    if Lout < 1 [ return(0) ]
+    box n = 0 int64
+    while n < N [
+        box co = 0 int64
+        while co < Cout [
+            box l = 0 int64
+            while l < Lout [
+                box acc = 0 int64
+                box ci = 0 int64
+                while ci < Cin [
+                    box k = 0 int64
+                    while k < K [
+                        box iv = load_i64(I, (((n * Cin + ci) * L) + (l + k)) * 8) int64
+                        box wv = load_i64(W, (((co * Cin + ci) * K) + k) * 8) int64
+                        acc = acc + iv * wv
+                        k = k + 1
+                    ]
+                    ci = ci + 1
+                ]
+                store_i64(O, (((n * Cout + co) * Lout) + l) * 8, acc)
+                l = l + 1
+            ]
+            co = co + 1
+        ]
+        n = n + 1
+    ]
+    return(N * Cout * Lout)
+]
+
+// ---- activations ----------------------------------------------------
+@cpu rt_relu(t ptr): int64 [
+    box n = load_i64(t, 16) int64
+    box d = ptr_add(t, 80) ptr
+    box i = 0 int64
+    while i < n [
+        box v = load_i64(d, i * 8) int64
+        if v < 0 [ store_i64(d, i * 8, 0) ]
+        i = i + 1
+    ]
+    return(n)
+]
+@cpu rt_leaky_relu(t ptr, slope_num int64, slope_den int64): int64 [
+    box n = load_i64(t, 16) int64
+    box d = ptr_add(t, 80) ptr
+    box i = 0 int64
+    while i < n [
+        box v = load_i64(d, i * 8) int64
+        if v < 0 [ store_i64(d, i * 8, (v * slope_num) / slope_den) ]
+        i = i + 1
+    ]
+    return(n)
+]
+@cpu rt_sigmoid_approx(t ptr): int64 [
+    // piecewise linear stand-in for integer pipeline
+    box n = load_i64(t, 16) int64
+    box d = ptr_add(t, 80) ptr
+    box i = 0 int64
+    while i < n [
+        box v = load_i64(d, i * 8) int64
+        if v < 0 - 10 [ v = 0 ]
+        if v > 10 [ v = 1 ]
+        if v >= 0 - 10 [
+            if v <= 10 [ v = (v + 10) / 20 ]
+        ]
+        store_i64(d, i * 8, v)
+        i = i + 1
+    ]
+    return(n)
+]
+@cpu rt_softmax_rows(t ptr, rows int64, cols int64): int64 [
+    // integer-stable: subtract max then normalize by sum
+    box d = ptr_add(t, 80) ptr
+    box r = 0 int64
+    while r < rows [
+        box mx = load_i64(d, r * cols * 8) int64
+        box c = 1 int64
+        while c < cols [
+            box v = load_i64(d, (r * cols + c) * 8) int64
+            if v > mx [ mx = v ]
+            c = c + 1
+        ]
+        box sum = 0 int64
+        c = 0
+        while c < cols [
+            box v = load_i64(d, (r * cols + c) * 8) - mx int64
+            if v < 0 [ v = 0 ]
+            store_i64(d, (r * cols + c) * 8, v)
+            sum = sum + v
+            c = c + 1
+        ]
+        if sum < 1 [ sum = 1 ]
+        c = 0
+        while c < cols [
+            store_i64(d, (r * cols + c) * 8, (load_i64(d, (r * cols + c) * 8) * 1000) / sum)
+            c = c + 1
+        ]
+        r = r + 1
+    ]
+    return(rows * cols)
+]
+
+// ---- optimizers -----------------------------------------------------
+@cpu rt_sgd(param ptr, grad ptr, lr_num int64, lr_den int64): int64 [
+    box n = load_i64(param, 16) int64
+    box P = ptr_add(param, 80) ptr
+    box G = ptr_add(grad, 80) ptr
+    box i = 0 int64
+    while i < n [
+        store_i64(P, i * 8, load_i64(P, i * 8) - (load_i64(G, i * 8) * lr_num) / lr_den)
+        i = i + 1
+    ]
+    return(n)
+]
+@cpu rt_sgd_momentum(param ptr, grad ptr, vel ptr, lr_num int64, lr_den int64, mu_num int64, mu_den int64): int64 [
+    box n = load_i64(param, 16) int64
+    box P = ptr_add(param, 80) ptr
+    box G = ptr_add(grad, 80) ptr
+    box V = ptr_add(vel, 80) ptr
+    box i = 0 int64
+    while i < n [
+        box v = (load_i64(V, i * 8) * mu_num) / mu_den + load_i64(G, i * 8) int64
+        store_i64(V, i * 8, v)
+        store_i64(P, i * 8, load_i64(P, i * 8) - (v * lr_num) / lr_den)
+        i = i + 1
+    ]
+    return(n)
+]
+@cpu rt_adam_step(param ptr, grad ptr, m ptr, v ptr, lr_num int64, lr_den int64, b1_num int64, b1_den int64, b2_num int64, b2_den int64, t int64): int64 [
+    // integer Adam (no sqrt — uses v as scale proxy)
+    box n = load_i64(param, 16) int64
+    box P = ptr_add(param, 80) ptr
+    box G = ptr_add(grad, 80) ptr
+    box M = ptr_add(m, 80) ptr
+    box V = ptr_add(v, 80) ptr
+    box i = 0 int64
+    while i < n [
+        box g = load_i64(G, i * 8) int64
+        box mm = (load_i64(M, i * 8) * b1_num) / b1_den + (g * (b1_den - b1_num)) / b1_den int64
+        box vv = (load_i64(V, i * 8) * b2_num) / b2_den + (g * g * (b2_den - b2_num)) / b2_den int64
+        store_i64(M, i * 8, mm)
+        store_i64(V, i * 8, vv)
+        box den = vv / 1000 int64
+        if den < 1 [ den = 1 ]
+        store_i64(P, i * 8, load_i64(P, i * 8) - (mm * lr_num) / (lr_den * den))
+        i = i + 1
+    ]
+    return(n)
+]
+@cpu rt_train_step(param ptr, grad ptr, lr_num int64, lr_den int64): int64 [
+    return(rt_sgd(param, grad, lr_num, lr_den))
+]
+
+// ---- GPU kernels ----------------------------------------------------
+@gpu rt_gpu_fill(t ptr, v int64, n int64): int64 [
+    box d = ptr_add(t, 80) ptr
+    box i = 0 int64
+    while i < n [
+        store_i64(d, i * 8, v)
+        i = i + 1
+    ]
+    return(n)
+]
+@gpu rt_gpu_add(dst ptr, a ptr, b ptr, n int64): int64 [
+    box D = ptr_add(dst, 80) ptr
+    box A = ptr_add(a, 80) ptr
+    box B = ptr_add(b, 80) ptr
+    box i = 0 int64
+    while i < n [
+        store_i64(D, i * 8, load_i64(A, i * 8) + load_i64(B, i * 8))
+        i = i + 1
+    ]
+    return(n)
+]
+@gpu rt_gpu_mul(dst ptr, a ptr, b ptr, n int64): int64 [
+    box D = ptr_add(dst, 80) ptr
+    box A = ptr_add(a, 80) ptr
+    box B = ptr_add(b, 80) ptr
+    box i = 0 int64
+    while i < n [
+        store_i64(D, i * 8, load_i64(A, i * 8) * load_i64(B, i * 8))
+        i = i + 1
+    ]
+    return(n)
+]
+@gpu rt_gpu_scale(t ptr, s int64, n int64): int64 [
+    box d = ptr_add(t, 80) ptr
+    box i = 0 int64
+    while i < n [
+        store_i64(d, i * 8, load_i64(d, i * 8) * s)
+        i = i + 1
+    ]
+    return(n)
+]
+@gpu rt_gpu_relu(t ptr, n int64): int64 [
+    box d = ptr_add(t, 80) ptr
+    box i = 0 int64
+    while i < n [
+        box v = load_i64(d, i * 8) int64
+        if v < 0 [ store_i64(d, i * 8, 0) ]
+        i = i + 1
+    ]
+    return(n)
+]
+@gpu rt_gpu_matmul(C ptr, A ptr, B ptr, M int64, N int64, K int64): int64 [
+    return(rt_matmul_tiled(C, A, B, M, N, K))
+]
+@gpu rt_gpu_axpy(y ptr, a int64, x ptr, n int64): int64 [
+    box Y = ptr_add(y, 80) ptr
+    box X = ptr_add(x, 80) ptr
+    box i = 0 int64
+    while i < n [
+        store_i64(Y, i * 8, a * load_i64(X, i * 8) + load_i64(Y, i * 8))
+        i = i + 1
+    ]
+    return(n)
+]
+
+// ---- TPU / NPU / LPU kernels ----------------------------------------
+@tpu rt_tpu_matmul(C ptr, A ptr, B ptr, M int64, N int64, K int64): int64 [
+    return(rt_matmul_tiled(C, A, B, M, N, K))
+]
+@tpu rt_tpu_fill(t ptr, v int64, n int64): int64 [ return(rt_fill(t, v)) ]
+@tpu rt_tpu_relu(t ptr, n int64): int64 [
+    box d = ptr_add(t, 80) ptr
+    box i = 0 int64
+    while i < n [
+        box v = load_i64(d, i * 8) int64
+        if v < 0 [ store_i64(d, i * 8, 0) ]
+        i = i + 1
+    ]
+    return(n)
+]
+@npu rt_npu_matmul(C ptr, A ptr, B ptr, M int64, N int64, K int64): int64 [
+    return(rt_matmul_tiled(C, A, B, M, N, K))
+]
+@npu rt_npu_fill(t ptr, v int64, n int64): int64 [ return(rt_fill(t, v)) ]
+@npu rt_npu_relu(t ptr, n int64): int64 [
+    box d = ptr_add(t, 80) ptr
+    box i = 0 int64
+    while i < n [
+        box v = load_i64(d, i * 8) int64
+        if v < 0 [ store_i64(d, i * 8, 0) ]
+        i = i + 1
+    ]
+    return(n)
+]
+@lpu rt_lpu_matmul(C ptr, A ptr, B ptr, M int64, N int64, K int64): int64 [
+    return(rt_matmul_tiled(C, A, B, M, N, K))
+]
+@lpu rt_lpu_fill(t ptr, v int64, n int64): int64 [ return(rt_fill(t, v)) ]
+@lpu rt_lpu_axpy(y ptr, a int64, x ptr, n int64): int64 [
+    box Y = ptr_add(y, 80) ptr
+    box X = ptr_add(x, 80) ptr
+    box i = 0 int64
+    while i < n [
+        store_i64(Y, i * 8, a * load_i64(X, i * 8) + load_i64(Y, i * 8))
+        i = i + 1
+    ]
+    return(n)
+]
+
+// ---- auto-dispatch (LPU→NPU→TPU→GPU→CPU) ----------------------------
+@cpu rt_matmul_auto(C ptr, A ptr, B ptr, M int64, N int64, K int64): int64 [
+    if lpu_available() == 1 [ return(rt_lpu_matmul(C, A, B, M, N, K)) ]
+    if npu_available() == 1 [
+        box r = rt_npu_matmul(C, A, B, M, N, K) int64
+        npu_sync()
+        return(r)
+    ]
+    if tpu_available() == 1 [ return(rt_tpu_matmul(C, A, B, M, N, K)) ]
+    if gpu_available() == 1 [
+        box r = rt_gpu_matmul(C, A, B, M, N, K) int64
+        gpu_sync()
+        return(r)
+    ]
+    return(rt_matmul_tiled(C, A, B, M, N, K))
+]
+@cpu rt_fill_auto(t ptr, v int64): int64 [
+    box n = load_i64(t, 16) int64
+    if lpu_available() == 1 [ return(rt_lpu_fill(t, v, n)) ]
+    if npu_available() == 1 [ box r = rt_npu_fill(t, v, n) int64 npu_sync() return(r) ]
+    if tpu_available() == 1 [ return(rt_tpu_fill(t, v, n)) ]
+    if gpu_available() == 1 [ box r = rt_gpu_fill(t, v, n) int64 gpu_sync() return(r) ]
+    return(rt_fill(t, v))
+]
+@cpu rt_relu_auto(t ptr): int64 [
+    box n = load_i64(t, 16) int64
+    if npu_available() == 1 [ box r = rt_npu_relu(t, n) int64 npu_sync() return(r) ]
+    if tpu_available() == 1 [ return(rt_tpu_relu(t, n)) ]
+    if gpu_available() == 1 [ box r = rt_gpu_relu(t, n) int64 gpu_sync() return(r) ]
+    return(rt_relu(t))
+]
+@cpu rt_add_auto(dst ptr, a ptr, b ptr): int64 [
+    box n = load_i64(dst, 16) int64
+    if gpu_available() == 1 [
+        box r = rt_gpu_add(dst, a, b, n) int64
+        gpu_sync()
+        return(r)
+    ]
+    return(rt_add(dst, a, b))
+]
+
+// ---- transfers ------------------------------------------------------
+@cpu rt_to_vram(host ptr, n int64): ptr [
+    box d = vram_alloc(n) ptr
+    vram_copy_to(d, host, n)
+    gpu_sync()
+    return(d)
+]
+@cpu rt_to_tpu(host ptr, n int64): ptr [
+    box d = tpu_alloc(n) ptr
+    tpu_copy_to(d, host, n)
+    return(d)
+]
+@cpu rt_to_npu(host ptr, n int64): ptr [
+    box d = npu_alloc(n) ptr
+    npu_copy_to(d, host, n)
+    return(d)
+]
+@cpu rt_to_lpu(host ptr, n int64): ptr [
+    box d = lpu_alloc(n) ptr
+    lpu_copy_to(d, host, n)
+    return(d)
+]
+@cpu rt_from_vram(host ptr, dev ptr, n int64): int64 [
+    box r = vram_copy_from(host, dev, n) int64
+    gpu_sync()
+    return(r)
+]
+
+// ---- TPU single-model API -------------------------------------------
+@cpu rt_tpu_load(path string): int64 [ return(tpu_load_model(path)) ]
+@cpu rt_tpu_unload(): int64 [ return(tpu_unload_model()) ]
+@cpu rt_tpu_ready(): int64 [ return(tpu_model_loaded()) ]
+@cpu rt_tpu_run(input ptr, in_n int64, output ptr, out_n int64): int64 [
+    return(tpu_invoke(input, in_n, output, out_n))
+]
+@cpu rt_npu_launch(): int64 [ return(npu_launch()) ]
+@cpu rt_npu_sync(): int64 [ return(npu_sync()) ]
+@cpu rt_lpu_launch(): int64 [ return(lpu_launch()) ]
+@cpu rt_lpu_sync(): int64 [ return(lpu_sync()) ]
+
+// ---- RTLE1 / RTMS IO ------------------------------------------------
+@cpu rt_write_tensor(path string, t ptr): int64 [
+    return(write_file_bin(path, t, rt_nbytes(t)))
+]
+@cpu rt_read_tensor(path string): ptr [ return(read_file(path)) ]
+@cpu rt_model_create(n_sections int64, payload int64): ptr [
+    box hdr = 32 int64
+    box tab = n_sections * 24 int64
+    box total = hdr + tab + payload int64
+    box m = allocator(total) ptr
+    memset_n(m, 0, total)
+    store_i64(m, 0, 0x31454C54)
+    store_i64(m, 8, 2)
+    store_i64(m, 16, n_sections)
+    store_i64(m, 24, 0)
+    return(m)
+]
+@cpu rt_model_set_section(m ptr, idx int64, id int64, off int64, len int64): int64 [
+    box base = 32 + idx * 24 int64
+    store_i64(m, base, id)
+    store_i64(m, base + 8, off)
+    store_i64(m, base + 16, len)
+    return(0)
+]
+@cpu rt_model_payload(m ptr): ptr [
+    box ns = load_i64(m, 16) int64
+    return(ptr_add(m, 32 + ns * 24))
+]
+@cpu rt_model_write(path string, m ptr, total int64): int64 [
+    return(write_file_bin(path, m, total))
+]
+@cpu rt_model_read(path string): ptr [ return(read_file(path)) ]
+@cpu rt_model_section_ptr(m ptr, idx int64): ptr [
+    box base = 32 + idx * 24 int64
+    box off = load_i64(m, base + 8) int64
+    return(ptr_add(rt_model_payload(m), off))
+]
+@cpu rt_model_section_len(m ptr, idx int64): int64 [
+    return(load_i64(m, 32 + idx * 24 + 16))
+]
+@cpu rt_write_weights(path string, t ptr): int64 [ return(rt_write_tensor(path, t)) ]
+@cpu rt_read_weights(path string): ptr [ return(rt_read_tensor(path)) ]
+@cpu rt_write_grads(path string, t ptr): int64 [ return(rt_write_tensor(path, t)) ]
+@cpu rt_read_grads(path string): ptr [ return(rt_read_tensor(path)) ]
+@cpu rt_write_checkpoint(path string, m ptr, total int64): int64 [
+    return(rt_model_write(path, m, total))
+]
+@cpu rt_read_checkpoint(path string): ptr [ return(rt_model_read(path)) ]
+
+// ---- loss helpers ---------------------------------------------------
+@cpu rt_mse_loss(pred ptr, target ptr): int64 [
+    box n = load_i64(pred, 16) int64
+    box P = ptr_add(pred, 80) ptr
+    box T = ptr_add(target, 80) ptr
+    box acc = 0 int64
+    box i = 0 int64
+    while i < n [
+        box d = load_i64(P, i * 8) - load_i64(T, i * 8) int64
+        acc = acc + d * d
+        i = i + 1
+    ]
+    if n < 1 [ return(0) ]
+    return(acc / n)
+]
+@cpu rt_grad_mse(grad ptr, pred ptr, target ptr): int64 [
+    box n = load_i64(pred, 16) int64
+    box G = ptr_add(grad, 80) ptr
+    box P = ptr_add(pred, 80) ptr
+    box T = ptr_add(target, 80) ptr
+    box i = 0 int64
+    while i < n [
+        store_i64(G, i * 8, (2 * (load_i64(P, i * 8) - load_i64(T, i * 8))) / n)
+        i = i + 1
+    ]
+    return(n)
+]

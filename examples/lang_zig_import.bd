@@ -1,0 +1,14 @@
+@import "languages/zig.bd"
+
+@cpu main(): int32 [
+    @zig[
+        var n i64 = 100;
+        var s i64 = 0;
+        while (n > 0) {
+        s += n;
+        n -= 1;
+        }
+        print(s);
+        return;
+    ]
+]

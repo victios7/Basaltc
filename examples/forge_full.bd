@@ -1,0 +1,31 @@
+@lang forge
+@rule forge "LET $name = $val" => "box $name = $val int64"
+@rule forge "ADD $name $val" => "$name = $name + $val"
+@rule forge "DEC $name" => "$name = $name - 1"
+@rule forge "WHILE $rest" => "while $rest ["
+@rule forge "IF $rest" => "if $rest ["
+@rule forge "END" => "]"
+@rule forge "PRINT $name" => "print_int($name)\nprint_nl()"
+@rule forge "SAY $rest" => "print_str($cond)\nprint_nl()"
+@rule forge "HALT" => "return(0)"
+@rule forge "#$rest" => "// $rest"
+
+@cpu main(): int32 [
+    @forge[
+        # full Forge demo
+        LET a = 10
+        LET b = 32
+        ADD a b
+        SAY "a+b"
+        PRINT a
+        LET t = 3
+        WHILE t > 0
+        SAY "tick"
+        DEC t
+        END
+        IF a > 0
+        SAY "positive"
+        END
+        HALT
+    ]
+]

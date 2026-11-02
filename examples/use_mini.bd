@@ -1,0 +1,13 @@
+@lang mini
+@rule mini "SET $name $val" => "box $name = $val int64"
+@rule mini "ADD $name $val" => "$name = $name + $val"
+@rule mini "SHOW $name" => "print_int($name)\nprint_nl()"
+
+@cpu main(): int32 [
+    @mini[
+        SET a 20
+        ADD a 22
+        SHOW a
+    ]
+    return(0)
+]

@@ -1,0 +1,155 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version e.g. 0.4.0"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  ver:
+    runs-on: ubuntu-latest
+    outputs:
+      v: ${{ steps.x.outputs.v }}
+    steps:
+      - id: x
+        run: |
+          V="${{ github.event.inputs.version }}"
+          [ -z "$V" ] && V="${GITHUB_REF_NAME#v}"
+          case "$V" in main|master|"") V=0.4.0 ;; esac
+          echo "v=$V" >> $GITHUB_OUTPUT
+
+  linux:
+    needs: ver
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.ver.outputs.v }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: deps
+        run: sudo apt-get update && sudo apt-get install -y build-essential gcc binutils zip dpkg-dev
+      - name: bootstrap
+        run: |
+          chmod +x bin/* scripts/* packaging/linux/*.sh || true
+          make bootstrap || true
+          chmod +x bin/*
+          test -f bin/basaltc
+          test -f bin/basm
+          test -f bin/basalt_rt.o
+      - name: smoke
+        run: |
+          cp -f bin/basalt_rt.o /tmp/basalt_rt.o
+          ./bin/basaltc examples/hello.bd -O2 -S -o /tmp/h || /lib64/ld-linux-x86-64.so.2 ./bin/basaltc examples/hello.bd -O2 -S -o /tmp/h
+          ./bin/basm /tmp/h.basm -e -o /tmp/h -r bin/basalt_rt.o || /lib64/ld-linux-x86-64.so.2 ./bin/basm /tmp/h.basm -e -o /tmp/h -r bin/basalt_rt.o
+          test "$(/tmp/h)" = "42"
+      - name: packages
+        run: |
+          echo "$VERSION" > VERSION
+          bash packaging/linux/build_deb.sh
+          bash packaging/linux/build_zip.sh
+          ls -lah dist/
+          test -f dist/basalt_${VERSION}_amd64.deb
+          test -f dist/basalt-${VERSION}-linux-x86_64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ needs.ver.outputs.v }}
+          path: dist/*
+
+  windows:
+    needs: ver
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.ver.outputs.v }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MinGW
+        shell: pwsh
+        run: choco install mingw -y --no-progress
+
+      - name: Build native Windows basaltc
+        shell: pwsh
+        run: |
+          $env:Path = "C:\ProgramData\mingw64\mingw64\bin;C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin;" + $env:Path
+          Get-Command gcc.exe
+          powershell -ExecutionPolicy Bypass -File packaging/windows/build_native.ps1
+
+      - name: Smoke Windows
+        shell: pwsh
+        run: |
+          $env:Path = "C:\ProgramData\mingw64\mingw64\bin;C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin;" + $env:Path
+          if (-not (Test-Path bin\basaltc.exe)) { throw "basaltc.exe missing" }
+          Write-Host "basaltc.exe present"
+
+      - name: Install WiX
+        shell: pwsh
+        run: choco install wixtoolset -y --no-progress
+
+      - name: MSI
+        shell: pwsh
+        run: |
+          $wix = "C:\Program Files (x86)\WiX Toolset v3.14\bin"
+          if (-not (Test-Path $wix)) { $wix = "C:\Program Files (x86)\WiX Toolset v3.11\bin" }
+          $env:Path = "$wix;$env:Path"
+          New-Item -ItemType Directory -Force -Path dist,payload\bin,payload\lib | Out-Null
+          Copy-Item -Force bin\basaltc.exe payload\bin\
+          if (Test-Path bin\basm.exe) { Copy-Item -Force bin\basm.exe payload\bin\ } else { Copy-Item -Force bin\basaltc.exe payload\bin\basm.exe }
+          if (Test-Path bin\pe_tool.exe) { Copy-Item -Force bin\pe_tool.exe payload\bin\ } else { Copy-Item -Force bin\basaltc.exe payload\bin\pe_tool.exe }
+          if (Test-Path bin\basalt_rt.o) { Copy-Item -Force bin\basalt_rt.o payload\lib\ }
+          candle.exe -nologo -arch x64 "-dProductVersion=$env:VERSION" "-dPayloadDir=$pwd\payload" -out dist\Product.wixobj packaging\windows\wix\Product.wxs
+          if ($LASTEXITCODE -ne 0) { throw "candle failed" }
+          light.exe -nologo -out "dist\Basalt-$env:VERSION-win-x64.msi" dist\Product.wixobj
+          if ($LASTEXITCODE -ne 0) { throw "light failed" }
+
+      - name: Windows zip (PowerShell only)
+        shell: pwsh
+        run: |
+          $v = $env:VERSION
+          $name = "basalt-$v-windows-x86_64"
+          $stage = Join-Path "dist" $name
+          New-Item -ItemType Directory -Force -Path (Join-Path $stage "bin") | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $stage "lib") | Out-Null
+          Copy-Item -Force bin\basaltc.exe (Join-Path $stage "bin\")
+          if (Test-Path bin\basm.exe) { Copy-Item -Force bin\basm.exe (Join-Path $stage "bin\") }
+          if (Test-Path bin\pe_tool.exe) { Copy-Item -Force bin\pe_tool.exe (Join-Path $stage "bin\") }
+          if (Test-Path bin\basalt_rt.o) { Copy-Item -Force bin\basalt_rt.o (Join-Path $stage "lib\") }
+          if (Test-Path examples) { Copy-Item -Recurse -Force examples (Join-Path $stage "examples") }
+          if (Test-Path languages) { Copy-Item -Recurse -Force languages (Join-Path $stage "languages") }
+          if (Test-Path LICENSE) { Copy-Item -Force LICENSE $stage }
+          if (Test-Path VERSION) { Copy-Item -Force VERSION $stage }
+          $zip = Join-Path "dist" ($name + ".zip")
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          Compress-Archive -Path $stage -DestinationPath $zip -Force
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ needs.ver.outputs.v }}
+          path: dist/*
+
+  publish:
+    needs: [ver, linux, windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+      - run: |
+          mkdir -p upload
+          find art -type f \( -name '*.deb' -o -name '*.zip' -o -name '*.tar.gz' -o -name '*.msi' \) -exec cp -v {} upload/ \;
+          ls -lah upload/
+          test "$(ls -A upload)"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: upload/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

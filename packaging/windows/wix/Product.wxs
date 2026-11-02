@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="Basalt" Language="1033" Version="$(var.ProductVersion)"
+           Manufacturer="Basalt Contributors"
+           UpgradeCode="8F3A2B1C-4D5E-4F6A-9B0C-1D2E3F4A5B6C">
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine"
+             Description="Basalt compiler for Windows x64" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Basalt is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="ProductFeature" Title="Basalt" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="EnvPath" />
+    </Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="Basalt">
+          <Directory Id="BINDIR" Name="bin" />
+          <Directory Id="LIBDIR" Name="lib" />
+          <Directory Id="SHAREDIR" Name="share">
+            <Directory Id="EXDIR" Name="examples" />
+            <Directory Id="LANGDIR" Name="languages" />
+          </Directory>
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <ComponentGroup Id="ProductComponents">
+      <Component Id="MainBins" Directory="BINDIR" Guid="A11B22C3-D44E-4F55-9660-778899AABB01">
+        <File Id="basaltc.exe" Source="$(var.PayloadDir)\bin\basaltc.exe" KeyPath="yes" />
+        <File Id="basm.exe" Source="$(var.PayloadDir)\bin\basm.exe" />
+        <File Id="pe_tool.exe" Source="$(var.PayloadDir)\bin\pe_tool.exe" />
+      </Component>
+      <Component Id="Runtime" Directory="LIBDIR" Guid="A11B22C3-D44E-4F55-9660-778899AABB02">
+        <File Id="basalt_rt" Source="$(var.PayloadDir)\lib\basalt_rt.o" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Component Id="EnvPath" Directory="INSTALLFOLDER" Guid="A11B22C3-D44E-4F55-9660-778899AABB03">
+      <Environment Id="PATH" Name="PATH" Value="[BINDIR]" Permanent="no" Part="last" Action="set" System="yes" />
+      <RegistryValue Root="HKLM" Key="Software\Basalt" Name="InstallDir" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+    </Component>
+  </Product>
+</Wix>

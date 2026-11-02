@@ -1,0 +1,6 @@
+@cpu main(): int32 [
+    box x = 300 int8
+    print_int(x)
+    print_nl()
+    return(0)
+]

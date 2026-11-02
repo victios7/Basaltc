@@ -1,0 +1,12 @@
+@cpu main(): int32 [
+    box n = 10000 int64
+    box s = 0 int64
+    box i = 1 int64
+    while i <= n [
+        s = s + i
+        i = i + 1
+    ]
+    print_int(s)
+    print_nl()
+    return(0)
+]

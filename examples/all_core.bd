@@ -1,0 +1,33 @@
+// Full core feature test for Basalt self-hosted compiler
+@cpu main(): int32 [
+    box a = 10 int32
+    box b = 3 int32
+    box sum = a + b int32
+    box dif = a - b int32
+    box prod = a * b int32
+    box quot = a / b int32
+    print_int(sum)
+    print_int(dif)
+    print_int(prod)
+    print_int(quot)
+
+    box n = 5 int32
+    box acc = 0 int32
+    while n > 0 [
+        acc = acc + n
+        n = n - 1
+    ]
+    print_int(acc)
+
+    if acc > 10 [
+        print_int(1)
+    ]
+    else [
+        print_int(0)
+    ]
+
+    const_box k = 99 int32
+    print_int(k)
+
+    return(0)
+]

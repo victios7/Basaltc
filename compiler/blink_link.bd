@@ -1,0 +1,178 @@
+// blink_link.bd — Basalt linker (x86_64 only)
+// One job: take .basm (or .o) → executable. Uses basm -e (encode+link).
+// No GAS. No gcc for the normal path. Optional -r runtime.o.
+
+@cpu bl_exists(path string): int64 [
+    box cmd = "test -f '" string
+    cmd = str_concat(cmd, path)
+    cmd = str_concat(cmd, "'")
+    // test -f returns 0 if exists
+    if system(cmd) == 0 [ return(1) ]
+    return(0)
+]
+
+@cpu bl_find_basm(): string [
+    if bl_exists("/tmp/basm") == 1 [ return("/tmp/basm") ]
+    if bl_exists("bin/basm") == 1 [ return("bin/basm") ]
+    if bl_exists("./basm") == 1 [ return("./basm") ]
+    return("basm")
+]
+
+@cpu bl_find_rt(is_bare int64): string [
+    if is_bare == 1 [
+        if bl_exists("/tmp/basalt_rt_bare.o") == 1 [ return("/tmp/basalt_rt_bare.o") ]
+        if bl_exists("bin/basalt_rt_bare.o") == 1 [ return("bin/basalt_rt_bare.o") ]
+        if bl_exists("bin/bedrock_rt_bare.o") == 1 [ return("bin/bedrock_rt_bare.o") ]
+    ]
+    if bl_exists("/tmp/basalt_rt.o") == 1 [ return("/tmp/basalt_rt.o") ]
+    if bl_exists("bin/basalt_rt.o") == 1 [ return("bin/basalt_rt.o") ]
+    if bl_exists("/tmp/bedrock_rt.o") == 1 [ return("/tmp/bedrock_rt.o") ]
+    if bl_exists("bin/bedrock_rt.o") == 1 [ return("bin/bedrock_rt.o") ]
+    return("")
+]
+
+@cpu bl_ends_with(s string, suf string): int64 [
+    box n = strlen(s) int64
+    box m = strlen(suf) int64
+    if n < m [ return(0) ]
+    if strcmp(substr(s, n - m, m), suf) == 0 [ return(1) ]
+    return(0)
+]
+
+// Fast path: basm file.basm -e -o out -r runtime.o
+@cpu bl_link_basm(basm_path string, out_path string, rt string, is_bare int64): int64 [
+    box basm = bl_find_basm() string
+    box cmd = basm string
+    cmd = str_concat(cmd, " '")
+    cmd = str_concat(cmd, basm_path)
+    cmd = str_concat(cmd, "' -e -o '")
+    cmd = str_concat(cmd, out_path)
+    cmd = str_concat(cmd, "'")
+    if strlen(rt) > 0 [
+        cmd = str_concat(cmd, " -r '")
+        cmd = str_concat(cmd, rt)
+        cmd = str_concat(cmd, "'")
+    ]
+    if is_bare == 1 [
+        // bare: still use basm encode; runtime bare if provided
+        cmd = cmd
+    ]
+    box rc = system(cmd) int64
+    if rc != 0 [
+        print_str("error: blink_link: basm failed for ")
+        print_str(basm_path)
+        print_nl()
+        return(1)
+    ]
+    box ch = str_concat("chmod +x '", out_path) string
+    ch = str_concat(ch, "' 2>/dev/null")
+    box cx = system(ch) int64
+    return(0)
+]
+
+@cpu main(): int32 [
+    box n = argc() int64
+    box out = "a.out" string
+    box rt = "" string
+    box is_bare = 0 int64
+    box verbose = 0 int64
+    box input = "" string
+    box is_pe = 0 int64
+    if n < 2 [
+        print_str("blink_link — Basalt linker (x86_64)\n")
+        print_str("usage: blink_link [-o out] [-r runtime.o] [--bare] [-W] [-v] file.basm\n")
+        print_str("  Uses basm -e (no GAS). Links basalt_rt.o when found.\n")
+        return(1)
+    ]
+    box ai = 1 int64
+    while ai < n [
+        box a = argv(ai) string
+        if strcmp(a, "-o") == 0 [
+            ai = ai + 1
+            if ai < n [ out = argv(ai) ]
+        ]
+        if strcmp(a, "-r") == 0 [
+            ai = ai + 1
+            if ai < n [ rt = argv(ai) ]
+        ]
+        if strcmp(a, "--bare") == 0 [ is_bare = 1 ]
+        if strcmp(a, "-bare") == 0 [ is_bare = 1 ]
+        if strcmp(a, "-W") == 0 [ is_pe = 1 ]
+        if strcmp(a, "-v") == 0 [ verbose = 1 ]
+        if char_at(a, 0) != 45 [
+            if strlen(input) == 0 [ input = a ]
+        ]
+        ai = ai + 1
+    ]
+    if strlen(input) == 0 [
+        print_str("error: blink_link: no input .basm\n")
+        return(1)
+    ]
+    if strlen(rt) == 0 [
+        rt = bl_find_rt(is_bare)
+    ]
+    if verbose == 1 [
+        print_str("blink_link: in=")
+        print_str(input)
+        print_str(" out=")
+        print_str(out)
+        print_str(" rt=")
+        print_str(rt)
+        print_nl()
+    ]
+    if bl_ends_with(input, ".basm") == 1 [
+        box rc = bl_link_basm(input, out, rt, is_bare) int64
+        if rc != 0 [ return(1) ]
+        if is_pe == 1 [
+            // PE wrap via pe_tool if present
+            box exe = str_concat(out, ".exe") string
+            box pcmd = "pe_tool '" string
+            pcmd = str_concat(pcmd, out)
+            pcmd = str_concat(pcmd, "' '")
+            pcmd = str_concat(pcmd, exe)
+            pcmd = str_concat(pcmd, "' 2>/dev/null")
+            box pr = system(pcmd) int64
+            if pr != 0 [
+                pcmd = "bin/pe_tool '"
+                pcmd = str_concat(pcmd, out)
+                pcmd = str_concat(pcmd, "' '")
+                pcmd = str_concat(pcmd, exe)
+                pcmd = str_concat(pcmd, "' 2>/dev/null")
+                pr = system(pcmd)
+            ]
+            if pr == 0 [
+                print_str("blink_link: PE ")
+                print_str(exe)
+                print_nl()
+            ]
+        ]
+        print_str("blink_link: linked ")
+        print_str(out)
+        print_nl()
+        return(0)
+    ]
+    // .o only: fall back to ld (rare)
+    if bl_ends_with(input, ".o") == 1 [
+        box cmd = "ld -nostdlib -static -e _start -o '" string
+        cmd = str_concat(cmd, out)
+        cmd = str_concat(cmd, "' '")
+        cmd = str_concat(cmd, input)
+        cmd = str_concat(cmd, "'")
+        if strlen(rt) > 0 [
+            cmd = str_concat(cmd, " '")
+            cmd = str_concat(cmd, rt)
+            cmd = str_concat(cmd, "'")
+        ]
+        box rc = system(cmd) int64
+        if rc != 0 [
+            print_str("error: blink_link: ld failed\n")
+            return(1)
+        ]
+        print_str("blink_link: linked ")
+        print_str(out)
+        print_nl()
+        return(0)
+    ]
+    print_str("error: blink_link: need .basm or .o input\n")
+    return(1)
+]

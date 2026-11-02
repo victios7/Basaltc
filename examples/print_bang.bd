@@ -1,0 +1,8 @@
+@cpu main(): int32 [
+    box x = 99 int64
+    print!(x)
+    print!()
+    print!("hi")
+    print!()
+    return(0)
+]

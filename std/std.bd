@@ -1,0 +1,2 @@
+// std — atajo a hl (print!/println! viven en el lenguaje; hl ayuda a I/O cómodo)
+@import "hl"

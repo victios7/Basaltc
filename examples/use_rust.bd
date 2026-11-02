@@ -1,0 +1,13 @@
+@lang rust
+@rule rust "let $name = $val;" => "box $name = $val int64"
+@rule rust "println!({}, $name);" => "print_int($name)\nprint_nl()"
+@rule rust "$name += $val;" => "$name = $name + $val"
+
+@cpu main(): int32 [
+    @rust[
+        let x = 10;
+        x += 11;
+        println!({}, x);
+    ]
+    return(0)
+]

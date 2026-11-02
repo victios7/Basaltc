@@ -1,0 +1,381 @@
+// BASM driver — encode helpers + link via best available linker
+// Preference: mold > ld.mold > ld.lld > lld > ld.gold > gold > ld
+// No gcc. Rebuild: basaltc compiler/basm.bd -O2 -o bin/basm
+
+@cpu starts_with(s string, pfx string): int64 [
+    box n = strlen(pfx) int64
+    if strlen(s) < n [ return(0) ]
+    box i = 0 int64
+    while i < n [
+        if char_at(s, i) != char_at(pfx, i) [ return(0) ]
+        i = i + 1
+    ]
+    return(1)
+]
+
+@cpu ends_with(s string, suf string): int64 [
+    box n = strlen(s) int64
+    box m = strlen(suf) int64
+    if n < m [ return(0) ]
+    box i = 0 int64
+    while i < m [
+        if char_at(s, n - m + i) != char_at(suf, i) [ return(0) ]
+        i = i + 1
+    ]
+    return(1)
+]
+
+@cpu trim_ws(s string): string [
+    box i = 0 int64
+    box n = strlen(s) int64
+    while i < n [
+        box c = char_at(s, i) int64
+        if c == 32 [ i = i + 1 ]
+        if c == 9 [ i = i + 1 ]
+        if c != 32 [
+            if c != 9 [
+                box j = n int64
+                while j > i [
+                    box d = char_at(s, j - 1) int64
+                    if d == 32 [ j = j - 1 ]
+                    if d == 9 [ j = j - 1 ]
+                    if d == 10 [ j = j - 1 ]
+                    if d == 13 [ j = j - 1 ]
+                    if d != 32 [
+                        if d != 9 [
+                            if d != 10 [
+                                if d != 13 [ return(substr(s, i, j - i)) ]
+                            ]
+                        ]
+                    ]
+                ]
+                return("")
+            ]
+        ]
+    ]
+    return("")
+]
+
+@cpu cmd_exists(name string): int64 [
+    box c = "command -v " string
+    c = str_concat(c, name)
+    c = str_concat(c, " >/dev/null 2>&1")
+    if system(c) == 0 [ return(1) ]
+    return(0)
+]
+
+// Best linker first
+@cpu pick_linker(): string [
+    if cmd_exists("mold") == 1 [ return("mold") ]
+    if cmd_exists("ld.mold") == 1 [ return("ld.mold") ]
+    if cmd_exists("ld.lld") == 1 [ return("ld.lld") ]
+    if cmd_exists("lld") == 1 [ return("lld") ]
+    if cmd_exists("ld.gold") == 1 [ return("ld.gold") ]
+    if cmd_exists("gold") == 1 [ return("gold") ]
+    if cmd_exists("ld") == 1 [ return("ld") ]
+    return("")
+]
+
+@cpu find_runtime(bare int64): string [
+    if bare == 1 [
+        if system("test -f /tmp/basalt_rt_bare.o") == 0 [ return("/tmp/basalt_rt_bare.o") ]
+        if system("test -f bin/basalt_rt_bare.o") == 0 [ return("bin/basalt_rt_bare.o") ]
+        return("")
+    ]
+    if system("test -f /tmp/basalt_rt.o") == 0 [ return("/tmp/basalt_rt.o") ]
+    if system("test -f bin/basalt_rt.o") == 0 [ return("bin/basalt_rt.o") ]
+    if system("test -f /usr/lib/basalt/basalt_rt.o") == 0 [ return("/usr/lib/basalt/basalt_rt.o") ]
+    return("")
+]
+
+// BASM line → gas (for as --64 → .o)
+@cpu line_to_gas(line string): string [
+    box L = trim_ws(line) string
+    if strlen(L) == 0 [ return("") ]
+    if char_at(L, 0) == 47 [
+        if char_at(L, 1) == 47 [ return("") ]
+    ]
+    box ci = 0 int64
+    while ci + 1 < strlen(L) [
+        if char_at(L, ci) == 47 [
+            if char_at(L, ci + 1) == 47 [
+                L = trim_ws(substr(L, 0, ci))
+                ci = strlen(L)
+            ]
+        ]
+        ci = ci + 1
+    ]
+    if strlen(L) == 0 [ return("") ]
+    if starts_with(L, ".func ") == 1 [
+        box name = trim_ws(substr(L, 6, strlen(L) - 6)) string
+        box o = "\n    .globl " string
+        o = str_concat(o, name)
+        o = str_concat(o, "\n")
+        o = str_concat(o, name)
+        o = str_concat(o, ":\n")
+        return(o)
+    ]
+    if starts_with(L, ".end") == 1 [ return("") ]
+    if starts_with(L, ".frame") == 1 [ return("") ]
+    if starts_with(L, ".slot") == 1 [ return("") ]
+    if char_at(L, 0) == 46 [ return(str_concat(L, "\n")) ]
+    if starts_with(L, "enter") == 1 [
+        return("    push %rbp\n    mov %rsp, %rbp\n    sub $128, %rsp\n")
+    ]
+    if starts_with(L, "reti") == 1 [ return("    leave\n    ret\n") ]
+    if starts_with(L, "retv") == 1 [ return("    leave\n    ret\n") ]
+    if starts_with(L, "ret") == 1 [ return("    ret\n") ]
+    if starts_with(L, "li") == 1 [
+        box rest = trim_ws(substr(L, 2, strlen(L) - 2)) string
+        box comma = 0 int64
+        box ri = 0 int64
+        while ri < strlen(rest) [
+            if char_at(rest, ri) == 44 [ comma = ri ]
+            ri = ri + 1
+        ]
+        box reg = trim_ws(substr(rest, 0, comma)) string
+        box imm = trim_ws(substr(rest, comma + 1, strlen(rest) - comma - 1)) string
+        if strcmp(reg, "r0") == 0 [ return(str_concat("    movq $", str_concat(imm, ", %rax\n"))) ]
+        if strcmp(reg, "r1") == 0 [ return(str_concat("    movq $", str_concat(imm, ", %rcx\n"))) ]
+        if strcmp(reg, "r2") == 0 [ return(str_concat("    movq $", str_concat(imm, ", %rdx\n"))) ]
+        return(str_concat("    movq $", str_concat(imm, ", %rax\n")))
+    ]
+    if starts_with(L, "store") == 1 [
+        box rest = trim_ws(substr(L, 5, strlen(L) - 5)) string
+        box comma = 0 int64
+        box ri = 0 int64
+        while ri < strlen(rest) [
+            if char_at(rest, ri) == 44 [ comma = ri ]
+            ri = ri + 1
+        ]
+        box slot = trim_ws(substr(rest, 0, comma)) string
+        // s8 -> -8(%rbp)
+        box off = substr(slot, 1, strlen(slot) - 1) string
+        return(str_concat("    movq %rax, -", str_concat(off, "(%rbp)\n")))
+    ]
+    if starts_with(L, "load") == 1 [
+        box rest = trim_ws(substr(L, 4, strlen(L) - 4)) string
+        box comma = 0 int64
+        box ri = 0 int64
+        while ri < strlen(rest) [
+            if char_at(rest, ri) == 44 [ comma = ri ]
+            ri = ri + 1
+        ]
+        box reg = trim_ws(substr(rest, 0, comma)) string
+        box slot = trim_ws(substr(rest, comma + 1, strlen(rest) - comma - 1)) string
+        box off = substr(slot, 1, strlen(slot) - 1) string
+        if strcmp(reg, "r0") == 0 [
+            return(str_concat("    movq -", str_concat(off, "(%rbp), %rax\n")))
+        ]
+        if strcmp(reg, "r1") == 0 [
+            return(str_concat("    movq -", str_concat(off, "(%rbp), %rcx\n")))
+        ]
+        return(str_concat("    movq -", str_concat(off, "(%rbp), %rax\n")))
+    ]
+    if starts_with(L, "mov") == 1 [
+        box rest = trim_ws(substr(L, 3, strlen(L) - 3)) string
+        if starts_with(rest, "r2, r0") == 1 [ return("    movq %rax, %rdx\n") ]
+        if starts_with(rest, "r0, r2") == 1 [ return("    movq %rdx, %rax\n") ]
+        if starts_with(rest, "r1, r0") == 1 [ return("    movq %rax, %rcx\n") ]
+        if starts_with(rest, "r0, r1") == 1 [ return("    movq %rcx, %rax\n") ]
+        return("    nop\n")
+    ]
+    if starts_with(L, "add") == 1 [
+        // add r0, r1 or add r0, 1
+        box rest = trim_ws(substr(L, 3, strlen(L) - 3)) string
+        if starts_with(rest, "r0, r1") == 1 [ return("    addq %rcx, %rax\n") ]
+        if starts_with(rest, "r0, 1") == 1 [ return("    addq $1, %rax\n") ]
+        return("    addq %rcx, %rax\n")
+    ]
+    if starts_with(L, "sub") == 1 [ return("    subq %rcx, %rax\n") ]
+    if starts_with(L, "mul") == 1 [ return("    imulq %rcx, %rax\n") ]
+    if starts_with(L, "cmp") == 1 [ return("    cmpq %rcx, %rax\n") ]
+    if starts_with(L, "jmp") == 1 [
+        return(str_concat("    jmp ", str_concat(trim_ws(substr(L, 3, strlen(L) - 3)), "\n")))
+    ]
+    if starts_with(L, "jge") == 1 [
+        return(str_concat("    jge ", str_concat(trim_ws(substr(L, 3, strlen(L) - 3)), "\n")))
+    ]
+    if starts_with(L, "jle") == 1 [
+        return(str_concat("    jle ", str_concat(trim_ws(substr(L, 3, strlen(L) - 3)), "\n")))
+    ]
+    if starts_with(L, "jg") == 1 [
+        return(str_concat("    jg ", str_concat(trim_ws(substr(L, 2, strlen(L) - 2)), "\n")))
+    ]
+    if starts_with(L, "jl") == 1 [
+        return(str_concat("    jl ", str_concat(trim_ws(substr(L, 2, strlen(L) - 2)), "\n")))
+    ]
+    if starts_with(L, "je") == 1 [
+        return(str_concat("    je ", str_concat(trim_ws(substr(L, 2, strlen(L) - 2)), "\n")))
+    ]
+    if starts_with(L, "jne") == 1 [
+        return(str_concat("    jne ", str_concat(trim_ws(substr(L, 3, strlen(L) - 3)), "\n")))
+    ]
+    if starts_with(L, "call ") == 1 [
+        box t = trim_ws(substr(L, 5, strlen(L) - 5)) string
+        if starts_with(t, "basalt_print_nl") == 1 [ return("    call basalt_print_nl\n") ]
+        if starts_with(t, "basalt_set_args") == 1 [ return("    call basalt_set_args\n") ]
+        if starts_with(t, "basalt_print") == 1 [ return("    call basalt_print_int\n") ]
+        return(str_concat("    call ", str_concat(t, "\n")))
+    ]
+    if starts_with(L, "print_int") == 1 [ return("    call basalt_print_int\n") ]
+    if starts_with(L, "arg ") == 1 [
+        // arg a0, r0
+        return("    mov %rax, %rdi\n")
+    ]
+    return(str_concat("    # ", str_concat(L, "\n")))
+]
+
+@cpu basm_to_gas(src string): string [
+    box out = "    .text\n    .globl _start\n    .globl main\n_start:\n    call main\n    mov %rax, %rdi\n    mov $60, %rax\n    syscall\n" string
+    box i = 0 int64
+    box n = strlen(src) int64
+    box line = "" string
+    while i <= n [
+        box ch = 10 int64
+        if i < n [ ch = char_at(src, i) ]
+        if ch != 10 [
+            if i < n [ line = str_concat(line, substr(src, i, 1)) ]
+        ]
+        if ch == 10 [
+            box g = line_to_gas(line) string
+            if strlen(g) > 0 [ out = str_concat(out, g) ]
+            line = ""
+        ]
+        i = i + 1
+    ]
+    return(out)
+]
+
+@cpu link_with_best(out_path string, obj_path string, rt_path string): int64 [
+    box linker = pick_linker() string
+    if strlen(linker) == 0 [
+        print_str("basm: error: no linker found (install mold, lld, or ld)\n")
+        return(1)
+    ]
+    print_str("basm: linker ")
+    print_str(linker)
+    print_nl()
+    box cmd = linker string
+    // mold/lld accept similar flags for static nostdlib
+    cmd = str_concat(cmd, " -nostdlib -static -e _start -o '")
+    cmd = str_concat(cmd, out_path)
+    cmd = str_concat(cmd, "' '")
+    cmd = str_concat(cmd, obj_path)
+    cmd = str_concat(cmd, "'")
+    if strlen(rt_path) > 0 [
+        cmd = str_concat(cmd, " '")
+        cmd = str_concat(cmd, rt_path)
+        cmd = str_concat(cmd, "'")
+    ]
+    box rc = system(cmd) int64
+    if rc != 0 [
+        // retry minimal flags
+        cmd = linker
+        cmd = str_concat(cmd, " -o '")
+        cmd = str_concat(cmd, out_path)
+        cmd = str_concat(cmd, "' '")
+        cmd = str_concat(cmd, obj_path)
+        cmd = str_concat(cmd, "'")
+        if strlen(rt_path) > 0 [
+            cmd = str_concat(cmd, " '")
+            cmd = str_concat(cmd, rt_path)
+            cmd = str_concat(cmd, "'")
+        ]
+        rc = system(cmd)
+    ]
+    if rc != 0 [
+        print_str("basm: error: link failed with ")
+        print_str(linker)
+        print_nl()
+        return(1)
+    ]
+    print_str("basm: linked ")
+    print_str(out_path)
+    print_nl()
+    return(0)
+]
+
+@cpu basm_encode_link(in_path string, out_path string, rt_path string): int64 [
+    box src = read_file(in_path) string
+    if strlen(src) == 0 [
+        print_str("basm: error: cannot read ")
+        print_str(in_path)
+        print_nl()
+        return(1)
+    ]
+    if cmd_exists("as") == 0 [
+        print_str("basm: error: assembler 'as' not found (binutils) for .o emission\n")
+        return(1)
+    ]
+    box gas = basm_to_gas(src) string
+    box sfile = str_concat(out_path, ".s") string
+    box ofile = str_concat(out_path, ".basm.o") string
+    if write_file(sfile, gas) < 0 [
+        print_str("basm: error: cannot write .s\n")
+        return(1)
+    ]
+    box cmd = "as --64 -o '" string
+    cmd = str_concat(cmd, ofile)
+    cmd = str_concat(cmd, "' '")
+    cmd = str_concat(cmd, sfile)
+    cmd = str_concat(cmd, "'")
+    if system(cmd) != 0 [
+        print_str("basm: error: as failed\n")
+        return(1)
+    ]
+    print_str("basm: wrote ")
+    print_str(ofile)
+    print_nl()
+    return(link_with_best(out_path, ofile, rt_path))
+]
+
+@cpu main(): int32 [
+    box ai = 1 int64
+    box ac = argc() int64
+    box out = "a.out" string
+    box rt = "" string
+    box input = "" string
+    box bare = 0 int64
+    box verbose = 0 int64
+    while ai < ac [
+        box a = argv(ai) string
+        if strcmp(a, "-e") == 0 [ verbose = verbose ]
+        if strcmp(a, "-o") == 0 [
+            ai = ai + 1
+            if ai < ac [ out = argv(ai) ]
+        ]
+        if strcmp(a, "-r") == 0 [
+            ai = ai + 1
+            if ai < ac [ rt = argv(ai) ]
+        ]
+        if strcmp(a, "-bare") == 0 [ bare = 1 ]
+        if strcmp(a, "-v") == 0 [ verbose = 1 ]
+        if strcmp(a, "--show-linker") == 0 [
+            box L = pick_linker() string
+            if strlen(L) == 0 [
+                print_str("none\n")
+                return(1)
+            ]
+            print_str(L)
+            print_nl()
+            return(0)
+        ]
+        if char_at(a, 0) != 45 [
+            if strlen(input) == 0 [ input = a ]
+        ]
+        ai = ai + 1
+    ]
+    if strlen(input) == 0 [
+        print_str("usage: basm [-e] [-o out] [-r rt.o] file.basm\n")
+        print_str("linker order: mold > lld > gold > ld\n")
+        return(1)
+    ]
+    if strlen(rt) == 0 [ rt = find_runtime(bare) ]
+    if verbose == 1 [
+        print_str("basm: using linker ")
+        print_str(pick_linker())
+        print_nl()
+    ]
+    return(basm_encode_link(input, out, rt))
+]
